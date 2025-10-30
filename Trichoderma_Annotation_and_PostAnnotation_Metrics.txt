@@ -1,0 +1,103 @@
+# Trichoderma Genome Annotation and Post-Annotation Metrics
+# NOTE:
+# This file contains independent command blocks used in different stages 
+# of the annotation prediction and post-annotation evaluation.
+# Each section should be executed separately, not as a single automated pipeline.
+# Tested under Linux environment with funannotate, bedtools, seqkit, gffread, BUSCO, and DIAMOND installed.
+
+##########################################################
+# SECTION 1: Genome Annotation Using funannotate predict
+##########################################################
+
+# Example 1: Trichoderma longibrachiatum
+funannotate predict \
+  -i /path/Input/T_longibrachiatum/T_longibrachiatum.cleaned.renamed.fasta \
+  -o /path/Output/T_longibrachiatum \
+  --species "Trichoderma longibrachiatum" \
+  --strain FL-4 \
+  --transcript_evidence /path/Input/T_longibrachiatum/transcripts_T_longibrachiatum.renamed.fa \
+  --protein_evidence /path/Input/T_species_FAA_Final/pooled_Trichoderma_protein_cdhit99.faa \
+  --augustus_species fusarium_graminearum \
+  --cpus 12
+
+
+# Example 2: Trichoderma citrinoviride
+funannotate predict \
+  -i /path/Input/T_citrinoviride/GCA_003025115.1_Trici_v4.0_genomic.fna.masked.clean \
+  -o /path/Output/T_citrinoviride \
+  --species "Trichoderma citrinoviride" \
+  --strain "TUCIM 6016" \
+  --transcript_evidence /path/Input/T_citrinoviride/T_citrinoviride_transcripts.fa \
+  --protein_evidence /path/Input/T_species_FAA_Final/pooled_Trichoderma_protein_cdhit99.faa \
+  --augustus_species fusarium_graminearum \
+  --busco_seed_species fusarium_graminearum \
+  --organism other \
+  --cpus 10
+
+
+##########################################################
+# SECTION 2: Post-Annotation Metrics
+##########################################################
+
+# Extract CDS Sequences from predicted GFF3 annotation
+gffread \
+  /path/predict_results/Trichoderma_reesei_QM6a.gff3 \
+  -g /path/predict_results/Trichoderma_reesei_QM6a.scaffolds.fa \
+  -x /path/predict_misc/T_reesei_cds.fa
+
+
+# Compute Average CDS Length
+seqkit fx2tab /path/predict_misc/T_reesei_cds.fa \
+  | awk '{sum += length($2)} END {if (NR > 0) print sum/NR; else print "No sequences found."}'
+
+
+##########################################################
+# SECTION 3: RNA-Seq Support Assessment
+##########################################################
+
+# Identify RNA-seq supported transcripts
+bedtools intersect \
+  -a /path/predict_results/Trichoderma_reesei_QM6a.gff3 \
+  -b /path/predict_misc/transcripts.minimap2.bam \
+  -wa -u \
+  | awk '$3 == "exon"' \
+  | awk '{split($9,a,/Parent=/); split(a[2],b,/;/); print b[1]}' \
+  | sort | uniq > supported_transcripts_Treesei.txt
+
+# Count supported transcripts
+wc -l supported_transcripts_Treesei.txt
+
+# Compare to total predicted transcripts
+grep -c "mRNA" /path/predict_results/Trichoderma_reesei_QM6a.gff3
+
+# Compute percentage of RNA-seq-supported transcripts
+echo "scale=2; $(wc -l < supported_transcripts_Treesei.txt) / $(grep -c 'mRNA' /path/predict_results/Trichoderma_reesei_QM6a.gff3) * 100" | bc
+
+
+##########################################################
+# SECTION 4: Functional Validation using DIAMOND BLASTp
+##########################################################
+
+diamond blastp \
+  -d /path/Input/T_citrinoviride/pan_trichoderma.dmnd \
+  -q /path/Output/T_citrinoviride/predict_results/Trichoderma_citrinoviride_TUCIM_6016.proteins.fa \
+  -o /path/Input/T_citrinoviride/protein_hits.tsv \
+  -e 1e-10 -k 1 --threads 12
+
+
+##########################################################
+# SECTION 5: Genome Completeness Assessment (BUSCO)
+##########################################################
+
+busco \
+  -i /path/predict_results/Trichoderma_reesei_QM6a.proteins.fa \
+  -l /path/busco_downloads/lineages/sordariomycetes_odb10 \
+  -o T_reesei_BUSCO \
+  -m protein \
+  -c 12 \
+  --out_path /path/Output/T_reesei_busco_protein_post_predict_2nd_run
+
+
+##########################################################
+# END OF FILE
+##########################################################
